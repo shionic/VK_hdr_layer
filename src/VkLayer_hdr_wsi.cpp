@@ -302,8 +302,8 @@ namespace HdrLayer
       {
         return result;
       }
-      VkSurfaceFormatKHR *formats = reinterpret_cast<VkSurfaceFormatKHR *>(malloc(sizeof(VkSurfaceFormatKHR) * count));
-      result = pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &count, formats);
+      std::vector<VkSurfaceFormatKHR> formats(count);
+      result = pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &count, formats.data());
       if (result != VK_SUCCESS)
       {
         return result;
@@ -313,7 +313,6 @@ namespace HdrLayer
       {
         pixelFormats.push_back(formats[i].format);
       }
-      free(formats);
 
       std::vector<VkSurfaceFormatKHR> extraFormats = {};
       for (auto desc = s_ExtraHDRSurfaceFormats.begin(); desc != s_ExtraHDRSurfaceFormats.end(); ++desc)
@@ -363,19 +362,23 @@ namespace HdrLayer
       if (!hdrSurface)
         return pDispatch->GetPhysicalDeviceSurfaceFormats2KHR(physicalDevice, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
 
-      uint32_t *count = nullptr;
-      VkSurfaceFormatKHR *formats = nullptr;
+      uint32_t count = 0;
       std::vector<VkFormat> pixelFormats = {};
-      auto result = pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, pSurfaceInfo->surface, count, formats);
+      auto result = pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, pSurfaceInfo->surface, &count, nullptr);
       if (result != VK_SUCCESS)
       {
         return result;
       }
-      for (uint32_t i = 0; i < *count; i++)
+      std::vector<VkSurfaceFormatKHR> formats(count);
+      result = pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, pSurfaceInfo->surface, &count, formats.data());
+      if (result != VK_SUCCESS)
+      {
+        return result;
+      }
+      for (uint32_t i = 0; i < count; i++)
       {
         pixelFormats.push_back(formats[i].format);
       }
-      free(formats);
 
       std::vector<VkSurfaceFormat2KHR> extraFormats = {};
       for (auto desc = s_ExtraHDRSurfaceFormats.begin(); desc != s_ExtraHDRSurfaceFormats.end(); ++desc)
