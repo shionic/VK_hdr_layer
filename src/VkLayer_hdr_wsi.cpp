@@ -296,7 +296,6 @@ namespace HdrLayer
         return pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, pSurfaceFormatCount, pSurfaceFormats);
 
       uint32_t count = 0;
-      std::vector<VkFormat> pixelFormats = {};
       auto result = pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &count, nullptr);
       if (result != VK_SUCCESS)
       {
@@ -309,19 +308,16 @@ namespace HdrLayer
         return result;
       }
 
-      for (uint32_t i = 0; i < count; i++)
-      {
-        pixelFormats.push_back(formats[i].format);
-      }
-
       std::vector<VkSurfaceFormatKHR> extraFormats = {};
-      for (auto desc = s_ExtraHDRSurfaceFormats.begin(); desc != s_ExtraHDRSurfaceFormats.end(); ++desc)
+      for (const auto &desc : s_ExtraHDRSurfaceFormats)
       {
-        // fprintf(stderr, "[HDR Layer] Testing format: %u colorspace: %u\n", desc->surface.surfaceFormat.format, desc->surface.surfaceFormat.colorSpace);
-        if (contains_u32(hdrSurface->tf_cicp, desc->tf_cicp) && contains_u32(hdrSurface->primaries_cicp, desc->primaries_cicp) && (!desc->extended_volume || contains_u32(hdrSurface->features, WP_COLOR_MANAGER_V1_FEATURE_EXTENDED_TARGET_VOLUME)) && std::find(pixelFormats.begin(), pixelFormats.end(), desc->surface.surfaceFormat.format) != pixelFormats.end())
+        const bool hasFormat = std::ranges::any_of(formats, [&desc](const VkSurfaceFormatKHR fmt) {
+          return desc.surface.surfaceFormat.format == fmt.format;
+        });
+        if (hasFormat)
         {
-          fprintf(stderr, "[HDR Layer] Enabling format: %u colorspace: %u\n", desc->surface.surfaceFormat.format, desc->surface.surfaceFormat.colorSpace);
-          extraFormats.push_back(desc->surface.surfaceFormat);
+          fprintf(stderr, "[HDR Layer] Enabling format: %u colorspace: %u\n", desc.surface.surfaceFormat.format, desc.surface.surfaceFormat.colorSpace);
+          extraFormats.push_back(desc.surface.surfaceFormat);
         }
       }
       /*
@@ -363,7 +359,6 @@ namespace HdrLayer
         return pDispatch->GetPhysicalDeviceSurfaceFormats2KHR(physicalDevice, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
 
       uint32_t count = 0;
-      std::vector<VkFormat> pixelFormats = {};
       auto result = pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, pSurfaceInfo->surface, &count, nullptr);
       if (result != VK_SUCCESS)
       {
@@ -375,20 +370,17 @@ namespace HdrLayer
       {
         return result;
       }
-      for (uint32_t i = 0; i < count; i++)
-      {
-        pixelFormats.push_back(formats[i].format);
-      }
 
       std::vector<VkSurfaceFormat2KHR> extraFormats = {};
-      for (auto desc = s_ExtraHDRSurfaceFormats.begin(); desc != s_ExtraHDRSurfaceFormats.end(); ++desc)
+      for (const auto &desc : s_ExtraHDRSurfaceFormats)
       {
-        // fprintf(stderr, "[HDR Layer] Testing format: %u colorspace: %u\n", desc->surface.surfaceFormat.format, desc->surface.surfaceFormat.colorSpace);
-        if (
-            contains_u32(hdrSurface->tf_cicp, desc->tf_cicp) && contains_u32(hdrSurface->primaries_cicp, desc->primaries_cicp) && (!desc->extended_volume || contains_u32(hdrSurface->features, WP_COLOR_MANAGER_V1_FEATURE_EXTENDED_TARGET_VOLUME)) && std::find(pixelFormats.begin(), pixelFormats.end(), desc->surface.surfaceFormat.format) != pixelFormats.end())
+        const bool hasFormat = std::ranges::any_of(formats, [&desc](const VkSurfaceFormatKHR fmt) {
+          return desc.surface.surfaceFormat.format == fmt.format;
+        });
+        if (hasFormat)
         {
-          fprintf(stderr, "[HDR Layer] Enabling format: %u colorspace: %u\n", desc->surface.surfaceFormat.format, desc->surface.surfaceFormat.colorSpace);
-          extraFormats.push_back(desc->surface);
+          fprintf(stderr, "[HDR Layer] Enabling format: %u colorspace: %u\n", desc.surface.surfaceFormat.format, desc.surface.surfaceFormat.colorSpace);
+          extraFormats.push_back(desc.surface);
         }
       }
       /*
