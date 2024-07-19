@@ -30,8 +30,8 @@ namespace HdrLayer
   struct ColorDescription
   {
     VkSurfaceFormat2KHR surface;
-    int primaries_cicp;
-    int tf_cicp;
+    int primaries_named;
+    int tf_named;
     bool extended_volume;
   };
 
@@ -41,10 +41,11 @@ namespace HdrLayer
                           VK_FORMAT_A2B10G10R10_UNORM_PACK32,
                           VK_COLOR_SPACE_HDR10_ST2084_EXT,
                       }},
-          .primaries_cicp = 9,
-          .tf_cicp = 16,
+          .primaries_named = XX_COLOR_MANAGER_V2_PRIMARIES_BT2020,
+          .tf_named = XX_COLOR_MANAGER_V2_TRANSFER_FUNCTION_ST2084_PQ,
           .extended_volume = false,
       },
+/*
       ColorDescription{
           .surface = {.surfaceFormat = {
                           VK_FORMAT_A2R10G10B10_UNORM_PACK32,
@@ -143,7 +144,8 @@ namespace HdrLayer
           .primaries_cicp = 1,
           .tf_cicp = 8,
           .extended_volume = true,
-      }};
+      }*/
+};
 
   struct HdrSurfaceData
   {
@@ -151,16 +153,14 @@ namespace HdrLayer
 
     wl_display *display;
     wl_event_queue *queue;
-    wp_color_manager_v1 *colorManagement;
-    wp_color_representation_manager_v1 *colorRepresentationMgr;
+    xx_color_manager_v2 *colorManagement;
 
     std::vector<uint32_t> features;
-    std::vector<uint32_t> tf_cicp;
-    std::vector<uint32_t> primaries_cicp;
+    std::vector<uint32_t> tf_named;
+    std::vector<uint32_t> primaries_named;
 
     wl_surface *surface;
-    wp_color_management_surface_v1 *colorSurface;
-    wp_color_representation_v1 *colorRepresentation;
+    xx_color_management_surface_v2 *colorSurface;
   };
   VKROOTS_DEFINE_SYNCHRONIZED_MAP_TYPE(HdrSurface, VkSurfaceKHR);
 
@@ -170,7 +170,7 @@ namespace HdrLayer
     int primaries;
     int tf;
 
-    wp_image_description_v1 *colorDescription;
+    xx_image_description_v2 *colorDescription;
     bool desc_dirty;
   };
   VKROOTS_DEFINE_SYNCHRONIZED_MAP_TYPE(HdrSwapchain, VkSwapchainKHR);
@@ -228,19 +228,17 @@ namespace HdrLayer
                                                             .display = pCreateInfo->display,
                                                             .queue = queue,
                                                             .colorManagement = nullptr,
-                                                            .colorRepresentationMgr = nullptr,
                                                             .features = {},
-                                                            .tf_cicp = {},
-                                                            .primaries_cicp = {},
+                                                            .tf_named = {},
+                                                            .primaries_named = {},
                                                             .surface = pCreateInfo->surface,
                                                             .colorSurface = nullptr,
-                                                            .colorRepresentation = nullptr,
                                                         });
 
         wl_registry_add_listener(registry, &s_registryListener, reinterpret_cast<void *>(hdrSurface.get()));
         wl_display_dispatch_queue(pCreateInfo->display, queue);
         wl_display_roundtrip_queue(pCreateInfo->display, queue); // get globals
-        wl_display_roundtrip_queue(pCreateInfo->display, queue); // get features/supported_cicps/etc
+        wl_display_roundtrip_queue(pCreateInfo->display, queue); // get features/supported tf, primaries/etc
         wl_registry_destroy(registry);
       }
 
@@ -251,34 +249,20 @@ namespace HdrLayer
         HdrSurface::remove(*pSurface);
         return VK_SUCCESS;
       }
-      if (!contains_u32(HdrSurface::get(*pSurface)->features, WP_COLOR_MANAGER_V1_FEATURE_PARAMETRIC))
+      if (!contains_u32(HdrSurface::get(*pSurface)->features, XX_COLOR_MANAGER_V2_FEATURE_PARAMETRIC))
       {
         fprintf(stderr, "[HDR Layer] color management implementation doesn't support parametric image descriptions..\n");
-        HdrSurface::remove(*pSurface);
-        return VK_SUCCESS;
-      }
-      if (!contains_u32(HdrSurface::get(*pSurface)->features, WP_COLOR_MANAGER_V1_FEATURE_SET_PRIMARIES))
-      {
-        fprintf(stderr, "[HDR Layer] color management implementation doesn't support SET_PRIMARIES..\n");
-        HdrSurface::remove(*pSurface);
-        return VK_SUCCESS;
-      }
-      if (!HdrSurface::get(*pSurface)->colorRepresentationMgr)
-      {
-        fprintf(stderr, "[HDR Layer] wayland compositor lacking color representation protocol..\n");
         HdrSurface::remove(*pSurface);
         return VK_SUCCESS;
       }
 
       auto hdrSurface = HdrSurface::get(*pSurface);
 
-      wp_color_management_surface_v1 *colorSurface = wp_color_manager_v1_get_color_management_surface(hdrSurface->colorManagement, pCreateInfo->surface);
-      wp_color_management_surface_v1_add_listener(colorSurface, &color_surface_interface_listener, nullptr);
-      wp_color_representation_v1 *colorRepresentation = wp_color_representation_manager_v1_create(hdrSurface->colorRepresentationMgr, pCreateInfo->surface);
+      xx_color_management_surface_v2 *colorSurface = xx_color_manager_v2_get_surface(hdrSurface->colorManagement, pCreateInfo->surface);
+      xx_color_management_surface_v2_add_listener(colorSurface, &color_surface_interface_listener, nullptr);
       wl_display_flush(hdrSurface->display);
 
       hdrSurface->colorSurface = colorSurface;
-      hdrSurface->colorRepresentation = colorRepresentation;
 
       fprintf(stderr, "[HDR Layer] Created HDR surface\n");
       return VK_SUCCESS;
@@ -418,10 +402,8 @@ namespace HdrLayer
     {
       if (auto state = HdrSurface::get(surface))
       {
-        wp_color_management_surface_v1_destroy(state->colorSurface);
-        wp_color_representation_v1_destroy(state->colorRepresentation);
-        wp_color_manager_v1_destroy(state->colorManagement);
-        wp_color_representation_manager_v1_destroy(state->colorRepresentationMgr);
+        xx_color_management_surface_v2_destroy(state->colorSurface);
+        xx_color_manager_v2_destroy(state->colorManagement);
         wl_event_queue_destroy(state->queue);
       }
       HdrSurface::remove(surface);
@@ -463,60 +445,48 @@ namespace HdrLayer
     }
 
   private:
-    static constexpr struct wp_color_manager_v1_listener color_interface_listener
+    static constexpr struct xx_color_manager_v2_listener color_interface_listener
     {
       .supported_intent = [](void *data,
-                             struct wp_color_manager_v1 *wp_color_manager_v1,
+                             struct xx_color_manager_v2 *xx_color_manager_v2,
                              uint32_t render_intent) {},
       .supported_feature = [](void *data,
-                              struct wp_color_manager_v1 *wp_color_manager_v1,
+                              struct xx_color_manager_v2 *xx_color_manager_v2,
                               uint32_t feature)
       {
         auto surface = reinterpret_cast<HdrSurfaceData *>(data);
         surface->features.push_back(feature);
       },
-      .supported_tf_cicp = [](void *data, struct wp_color_manager_v1 *wp_color_manager_v1, uint32_t tf_code)
+      .supported_tf_named = [](void *data, struct xx_color_manager_v2 *xx_color_manager_v2, uint32_t tf_code)
       {
         auto surface = reinterpret_cast<HdrSurfaceData *>(data);
-        surface->tf_cicp.push_back(tf_code);
+        surface->tf_named.push_back(tf_code);
       },
-      .supported_primaries_cicp = [](void *data, struct wp_color_manager_v1 *wp_color_manager_v1, uint32_t primaries_code)
+      .supported_primaries_named = [](void *data, struct xx_color_manager_v2 *xx_color_manager_v2, uint32_t primaries_code)
       {
         auto surface = reinterpret_cast<HdrSurfaceData *>(data);
-        surface->primaries_cicp.push_back(primaries_code);
+        surface->primaries_named.push_back(primaries_code);
       }
     };
 
-    static constexpr struct wp_color_representation_manager_v1_listener representation_interface_listener
-    {
-      .coefficients = [](void *data,
-                         struct wp_color_representation_manager_v1 *wp_color_representation_manager_v1,
-                         uint32_t code_point) {},
-      .chroma_location = [](void *data,
-                            struct wp_color_representation_manager_v1 *wp_color_representation_manager_v1,
-                            uint32_t code_point) {}
-    };
-
-    static constexpr struct wp_color_management_surface_v1_listener color_surface_interface_listener
+    static constexpr struct xx_color_management_surface_v2_listener color_surface_interface_listener
     {
       .preferred_changed = [](void *data,
-                              struct wp_color_management_surface_v1 *wp_color_management_surface_v1) {}
+                              struct xx_color_management_surface_v2 *xx_color_management_surface_v2) {}
     };
 
     static constexpr wl_registry_listener s_registryListener = {
         .global = [](void *data, wl_registry *registry, uint32_t name, const char *interface, uint32_t version)
         {
-        auto surface = reinterpret_cast<HdrSurfaceData *>(data);
+          auto surface = reinterpret_cast<HdrSurfaceData *>(data);
 
-        if (interface == "wp_color_manager_v1"sv) {
-          surface->colorManagement = reinterpret_cast<wp_color_manager_v1 *>(
-            wl_registry_bind(registry, name, &wp_color_manager_v1_interface, version));
-          wp_color_manager_v1_add_listener(surface->colorManagement, &color_interface_listener, data);
-        } else if (interface == "wp_color_representation_manager_v1"sv) {
-          surface->colorRepresentationMgr = reinterpret_cast<wp_color_representation_manager_v1 *>(
-            wl_registry_bind(registry, name, &wp_color_representation_manager_v1_interface, version));
-          wp_color_representation_manager_v1_add_listener(surface->colorRepresentationMgr, &representation_interface_listener, nullptr);
-        } },
+          if (interface == "xx_color_manager_v2"sv)
+          {
+            surface->colorManagement = reinterpret_cast<xx_color_manager_v2 *>(
+              wl_registry_bind(registry, name, &xx_color_manager_v2_interface, version));
+            xx_color_manager_v2_add_listener(surface->colorManagement, &color_interface_listener, data);
+          }
+        },
         .global_remove = [](void *data, wl_registry *registry, uint32_t name) {},
     };
   };
@@ -591,11 +561,13 @@ namespace HdrLayer
       {
         if (pCreateInfo->compositeAlpha == VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
         {
-          wp_color_representation_v1_set_alpha_mode(hdrSurface->colorRepresentation, WP_COLOR_REPRESENTATION_V1_ALPHA_MODE_PREMULTIPLIED_ELECTRICAL);
+          // FIXME
+          //wp_color_representation_v1_set_alpha_mode(hdrSurface->colorRepresentation, WP_COLOR_REPRESENTATION_V1_ALPHA_MODE_PREMULTIPLIED_ELECTRICAL);
         }
         else if (pCreateInfo->compositeAlpha == VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)
         {
-          wp_color_representation_v1_set_alpha_mode(hdrSurface->colorRepresentation, WP_COLOR_REPRESENTATION_V1_ALPHA_MODE_STRAIGHT);
+        // FIXME
+          //wp_color_representation_v1_set_alpha_mode(hdrSurface->colorRepresentation, WP_COLOR_REPRESENTATION_V1_ALPHA_MODE_STRAIGHT);
         }
 
         auto primaries = 0;
@@ -604,8 +576,8 @@ namespace HdrLayer
         {
           if (desc->surface.surfaceFormat.colorSpace == pCreateInfo->imageColorSpace)
           {
-            primaries = desc->primaries_cicp;
-            tf = desc->tf_cicp;
+            primaries = desc->primaries_named;
+            tf = desc->tf_named;
             break;
           }
         }
@@ -621,16 +593,16 @@ namespace HdrLayer
         }
         */
 
-        wp_image_description_v1 *desc = nullptr;
+        xx_image_description_v2 *desc = nullptr;
 
         if (primaries != 0 && tf != 0)
         {
           auto status = DescStatus::WAITING;
-          wp_image_description_creator_params_v1 *params = wp_color_manager_v1_new_parametric_creator(hdrSurface->colorManagement);
-          wp_image_description_creator_params_v1_set_primaries_cicp(params, primaries);
-          wp_image_description_creator_params_v1_set_tf_cicp(params, tf);
-          desc = wp_image_description_creator_params_v1_create(params);
-          wp_image_description_v1_add_listener(desc, &image_description_interface_listener, &status);
+          xx_image_description_creator_params_v2 *params = xx_color_manager_v2_new_parametric_creator(hdrSurface->colorManagement);
+          xx_image_description_creator_params_v2_set_primaries_named(params, primaries);
+          xx_image_description_creator_params_v2_set_tf_named(params, tf);
+          desc = xx_image_description_creator_params_v2_create(params);
+          xx_image_description_v2_add_listener(desc, &image_description_interface_listener, &status);
           while (status == DescStatus::WAITING)
           {
             wl_display_roundtrip_queue(hdrSurface->display, hdrSurface->queue);
@@ -665,6 +637,9 @@ namespace HdrLayer
         const VkSwapchainKHR *pSwapchains,
         const VkHdrMetadataEXT *pMetadata)
     {
+      //FIXME!
+      return;
+
       for (uint32_t i = 0; i < swapchainCount; i++)
       {
         auto hdrSwapchain = HdrSwapchain::get(pSwapchains[i]);
@@ -683,8 +658,8 @@ namespace HdrLayer
         }
 
         const VkHdrMetadataEXT &metadata = pMetadata[i];
-        wp_image_description_creator_params_v1 *params = wp_color_manager_v1_new_parametric_creator(hdrSurface->colorManagement);
-        wp_image_description_creator_params_v1_set_mastering_display_primaries(
+        xx_image_description_creator_params_v2 *params = xx_color_manager_v2_new_parametric_creator(hdrSurface->colorManagement);
+        xx_image_description_creator_params_v2_set_mastering_display_primaries(
             params,
             (uint32_t)round(metadata.displayPrimaryRed.x * 10000.0),
             (uint32_t)round(metadata.displayPrimaryRed.y * 10000.0),
@@ -694,18 +669,18 @@ namespace HdrLayer
             (uint32_t)round(metadata.displayPrimaryBlue.y * 10000.0),
             (uint32_t)round(metadata.whitePoint.x * 10000.0),
             (uint32_t)round(metadata.whitePoint.y * 10000.0));
-        wp_image_description_creator_params_v1_set_mastering_luminance(
+        xx_image_description_creator_params_v2_set_mastering_luminance(
             params,
             (uint32_t)round(metadata.minLuminance * 10000.0),
             (uint32_t)round(metadata.maxLuminance));
-        wp_image_description_creator_params_v1_set_primaries_cicp(params, hdrSwapchain->primaries);
-        wp_image_description_creator_params_v1_set_tf_cicp(params, hdrSwapchain->tf);
-        wp_image_description_creator_params_v1_set_max_cll(params, (uint32_t)round(metadata.maxContentLightLevel));
-        wp_image_description_creator_params_v1_set_max_fall(params, (uint32_t)round(metadata.maxFrameAverageLightLevel));
+        xx_image_description_creator_params_v2_set_primaries_named(params, hdrSwapchain->primaries);
+        xx_image_description_creator_params_v2_set_tf_named(params, hdrSwapchain->tf);
+        xx_image_description_creator_params_v2_set_max_cll(params, (uint32_t)round(metadata.maxContentLightLevel));
+        xx_image_description_creator_params_v2_set_max_fall(params, (uint32_t)round(metadata.maxFrameAverageLightLevel));
 
         auto status = DescStatus::WAITING;
-        wp_image_description_v1 *desc = wp_image_description_creator_params_v1_create(params);
-        wp_image_description_v1_add_listener(desc, &image_description_interface_listener, &status);
+        xx_image_description_v2 *desc = xx_image_description_creator_params_v2_create(params);
+        xx_image_description_v2_add_listener(desc, &image_description_interface_listener, &status);
         while (status == DescStatus::WAITING)
         {
           wl_display_roundtrip_queue(hdrSurface->display, hdrSurface->queue);
@@ -740,11 +715,11 @@ namespace HdrLayer
             auto hdrSurface = HdrSurface::get(hdrSwapchain->surface);
             if (hdrSwapchain->colorDescription)
             {
-              wp_color_management_surface_v1_set_image_description(hdrSurface->colorSurface, hdrSwapchain->colorDescription, WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
+              xx_color_management_surface_v2_set_image_description(hdrSurface->colorSurface, hdrSwapchain->colorDescription, XX_COLOR_MANAGER_V2_RENDER_INTENT_PERCEPTUAL);
             }
             else
             {
-              wp_color_management_surface_v1_set_default_image_description(hdrSurface->colorSurface);
+              xx_color_management_surface_v2_unset_image_description(hdrSurface->colorSurface);
             }
             hdrSwapchain->desc_dirty = false;
           }
@@ -755,11 +730,11 @@ namespace HdrLayer
     }
 
   private:
-    static constexpr struct wp_image_description_v1_listener image_description_interface_listener
+    static constexpr struct xx_image_description_v2_listener image_description_interface_listener
     {
       .failed = [](
                     void *data,
-                    struct wp_image_description_v1 *wp_image_description_v1,
+                    struct xx_image_description_v2 *xx_image_description_v2,
                     uint32_t cause,
                     const char *msg)
       {
@@ -767,7 +742,7 @@ namespace HdrLayer
         auto state = reinterpret_cast<enum DescStatus *>(data);
         *state = DescStatus::FAILED;
       },
-      .ready = [](void *data, struct wp_image_description_v1 *wp_image_description_v1, uint32_t identity)
+      .ready = [](void *data, struct xx_image_description_v2 *xx_image_description_v2, uint32_t identity)
       {
         auto state = reinterpret_cast<enum DescStatus *>(data);
         *state = DescStatus::READY;
