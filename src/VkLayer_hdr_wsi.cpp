@@ -41,8 +41,8 @@ namespace HdrLayer
                           VK_FORMAT_A2B10G10R10_UNORM_PACK32,
                           VK_COLOR_SPACE_HDR10_ST2084_EXT,
                       }},
-          .primaries_named = XX_COLOR_MANAGER_V2_PRIMARIES_BT2020,
-          .tf_named = XX_COLOR_MANAGER_V2_TRANSFER_FUNCTION_ST2084_PQ,
+          .primaries_named = XX_COLOR_MANAGER_V4_PRIMARIES_BT2020,
+          .tf_named = XX_COLOR_MANAGER_V4_TRANSFER_FUNCTION_ST2084_PQ,
           .extended_volume = false,
       },
 /*
@@ -153,14 +153,14 @@ namespace HdrLayer
 
     wl_display *display;
     wl_event_queue *queue;
-    xx_color_manager_v2 *colorManagement;
+    xx_color_manager_v4 *colorManagement;
 
     std::vector<uint32_t> features;
     std::vector<uint32_t> tf_named;
     std::vector<uint32_t> primaries_named;
 
     wl_surface *surface;
-    xx_color_management_surface_v2 *colorSurface;
+    xx_color_management_surface_v4 *colorSurface;
   };
   VKROOTS_DEFINE_SYNCHRONIZED_MAP_TYPE(HdrSurface, VkSurfaceKHR);
 
@@ -170,7 +170,7 @@ namespace HdrLayer
     int primaries;
     int tf;
 
-    xx_image_description_v2 *colorDescription;
+    xx_image_description_v4 *colorDescription;
     bool desc_dirty;
   };
   VKROOTS_DEFINE_SYNCHRONIZED_MAP_TYPE(HdrSwapchain, VkSwapchainKHR);
@@ -249,7 +249,7 @@ namespace HdrLayer
         HdrSurface::remove(*pSurface);
         return VK_SUCCESS;
       }
-      if (!contains_u32(HdrSurface::get(*pSurface)->features, XX_COLOR_MANAGER_V2_FEATURE_PARAMETRIC))
+      if (!contains_u32(HdrSurface::get(*pSurface)->features, XX_COLOR_MANAGER_V4_FEATURE_PARAMETRIC))
       {
         fprintf(stderr, "[HDR Layer] color management implementation doesn't support parametric image descriptions..\n");
         HdrSurface::remove(*pSurface);
@@ -258,9 +258,7 @@ namespace HdrLayer
 
       auto hdrSurface = HdrSurface::get(*pSurface);
 
-      xx_color_management_surface_v2 *colorSurface = xx_color_manager_v2_get_surface(hdrSurface->colorManagement, pCreateInfo->surface);
-      xx_color_management_surface_v2_add_listener(colorSurface, &color_surface_interface_listener, nullptr);
-      wl_display_flush(hdrSurface->display);
+      xx_color_management_surface_v4 *colorSurface = xx_color_manager_v4_get_surface(hdrSurface->colorManagement, pCreateInfo->surface);
 
       hdrSurface->colorSurface = colorSurface;
 
@@ -402,8 +400,8 @@ namespace HdrLayer
     {
       if (auto state = HdrSurface::get(surface))
       {
-        xx_color_management_surface_v2_destroy(state->colorSurface);
-        xx_color_manager_v2_destroy(state->colorManagement);
+        xx_color_management_surface_v4_destroy(state->colorSurface);
+        xx_color_manager_v4_destroy(state->colorManagement);
         wl_event_queue_destroy(state->queue);
       }
       HdrSurface::remove(surface);
@@ -445,34 +443,28 @@ namespace HdrLayer
     }
 
   private:
-    static constexpr struct xx_color_manager_v2_listener color_interface_listener
+    static constexpr struct xx_color_manager_v4_listener color_interface_listener
     {
       .supported_intent = [](void *data,
-                             struct xx_color_manager_v2 *xx_color_manager_v2,
+                             struct xx_color_manager_v4 *xx_color_manager_V4,
                              uint32_t render_intent) {},
       .supported_feature = [](void *data,
-                              struct xx_color_manager_v2 *xx_color_manager_v2,
+                              struct xx_color_manager_v4 *xx_color_manager_V4,
                               uint32_t feature)
       {
         auto surface = reinterpret_cast<HdrSurfaceData *>(data);
         surface->features.push_back(feature);
       },
-      .supported_tf_named = [](void *data, struct xx_color_manager_v2 *xx_color_manager_v2, uint32_t tf_code)
+      .supported_tf_named = [](void *data, struct xx_color_manager_v4 *xx_color_manager_V4, uint32_t tf_code)
       {
         auto surface = reinterpret_cast<HdrSurfaceData *>(data);
         surface->tf_named.push_back(tf_code);
       },
-      .supported_primaries_named = [](void *data, struct xx_color_manager_v2 *xx_color_manager_v2, uint32_t primaries_code)
+      .supported_primaries_named = [](void *data, struct xx_color_manager_v4 *xx_color_manager_V4, uint32_t primaries_code)
       {
         auto surface = reinterpret_cast<HdrSurfaceData *>(data);
         surface->primaries_named.push_back(primaries_code);
       }
-    };
-
-    static constexpr struct xx_color_management_surface_v2_listener color_surface_interface_listener
-    {
-      .preferred_changed = [](void *data,
-                              struct xx_color_management_surface_v2 *xx_color_management_surface_v2) {}
     };
 
     static constexpr wl_registry_listener s_registryListener = {
@@ -480,11 +472,11 @@ namespace HdrLayer
         {
           auto surface = reinterpret_cast<HdrSurfaceData *>(data);
 
-          if (interface == "xx_color_manager_v2"sv)
+          if (interface == "xx_color_manager_v4"sv)
           {
-            surface->colorManagement = reinterpret_cast<xx_color_manager_v2 *>(
-              wl_registry_bind(registry, name, &xx_color_manager_v2_interface, version));
-            xx_color_manager_v2_add_listener(surface->colorManagement, &color_interface_listener, data);
+            surface->colorManagement = reinterpret_cast<xx_color_manager_v4 *>(
+              wl_registry_bind(registry, name, &xx_color_manager_v4_interface, version));
+            xx_color_manager_v4_add_listener(surface->colorManagement, &color_interface_listener, data);
           }
         },
         .global_remove = [](void *data, wl_registry *registry, uint32_t name) {},
@@ -593,16 +585,16 @@ namespace HdrLayer
         }
         */
 
-        xx_image_description_v2 *desc = nullptr;
+        xx_image_description_v4 *desc = nullptr;
 
         if (primaries != 0 && tf != 0)
         {
           auto status = DescStatus::WAITING;
-          xx_image_description_creator_params_v2 *params = xx_color_manager_v2_new_parametric_creator(hdrSurface->colorManagement);
-          xx_image_description_creator_params_v2_set_primaries_named(params, primaries);
-          xx_image_description_creator_params_v2_set_tf_named(params, tf);
-          desc = xx_image_description_creator_params_v2_create(params);
-          xx_image_description_v2_add_listener(desc, &image_description_interface_listener, &status);
+          xx_image_description_creator_params_v4 *params = xx_color_manager_v4_new_parametric_creator(hdrSurface->colorManagement);
+          xx_image_description_creator_params_v4_set_primaries_named(params, primaries);
+          xx_image_description_creator_params_v4_set_tf_named(params, tf);
+          desc = xx_image_description_creator_params_v4_create(params);
+          xx_image_description_v4_add_listener(desc, &image_description_interface_listener, &status);
           while (status == DescStatus::WAITING)
           {
             wl_display_roundtrip_queue(hdrSurface->display, hdrSurface->queue);
@@ -658,8 +650,8 @@ namespace HdrLayer
         }
 
         const VkHdrMetadataEXT &metadata = pMetadata[i];
-        xx_image_description_creator_params_v2 *params = xx_color_manager_v2_new_parametric_creator(hdrSurface->colorManagement);
-        xx_image_description_creator_params_v2_set_mastering_display_primaries(
+        xx_image_description_creator_params_v4 *params = xx_color_manager_v4_new_parametric_creator(hdrSurface->colorManagement);
+        xx_image_description_creator_params_v4_set_mastering_display_primaries(
             params,
             (uint32_t)round(metadata.displayPrimaryRed.x * 10000.0),
             (uint32_t)round(metadata.displayPrimaryRed.y * 10000.0),
@@ -669,18 +661,18 @@ namespace HdrLayer
             (uint32_t)round(metadata.displayPrimaryBlue.y * 10000.0),
             (uint32_t)round(metadata.whitePoint.x * 10000.0),
             (uint32_t)round(metadata.whitePoint.y * 10000.0));
-        xx_image_description_creator_params_v2_set_mastering_luminance(
+        xx_image_description_creator_params_v4_set_mastering_luminance(
             params,
             (uint32_t)round(metadata.minLuminance * 10000.0),
             (uint32_t)round(metadata.maxLuminance));
-        xx_image_description_creator_params_v2_set_primaries_named(params, hdrSwapchain->primaries);
-        xx_image_description_creator_params_v2_set_tf_named(params, hdrSwapchain->tf);
-        xx_image_description_creator_params_v2_set_max_cll(params, (uint32_t)round(metadata.maxContentLightLevel));
-        xx_image_description_creator_params_v2_set_max_fall(params, (uint32_t)round(metadata.maxFrameAverageLightLevel));
+        xx_image_description_creator_params_v4_set_primaries_named(params, hdrSwapchain->primaries);
+        xx_image_description_creator_params_v4_set_tf_named(params, hdrSwapchain->tf);
+        xx_image_description_creator_params_v4_set_max_cll(params, (uint32_t)round(metadata.maxContentLightLevel));
+        xx_image_description_creator_params_v4_set_max_fall(params, (uint32_t)round(metadata.maxFrameAverageLightLevel));
 
         auto status = DescStatus::WAITING;
-        xx_image_description_v2 *desc = xx_image_description_creator_params_v2_create(params);
-        xx_image_description_v2_add_listener(desc, &image_description_interface_listener, &status);
+        xx_image_description_v4 *desc = xx_image_description_creator_params_v4_create(params);
+        xx_image_description_v4_add_listener(desc, &image_description_interface_listener, &status);
         while (status == DescStatus::WAITING)
         {
           wl_display_roundtrip_queue(hdrSurface->display, hdrSurface->queue);
@@ -715,11 +707,11 @@ namespace HdrLayer
             auto hdrSurface = HdrSurface::get(hdrSwapchain->surface);
             if (hdrSwapchain->colorDescription)
             {
-              xx_color_management_surface_v2_set_image_description(hdrSurface->colorSurface, hdrSwapchain->colorDescription, XX_COLOR_MANAGER_V2_RENDER_INTENT_PERCEPTUAL);
+              xx_color_management_surface_v4_set_image_description(hdrSurface->colorSurface, hdrSwapchain->colorDescription, XX_COLOR_MANAGER_V4_RENDER_INTENT_PERCEPTUAL);
             }
             else
             {
-              xx_color_management_surface_v2_unset_image_description(hdrSurface->colorSurface);
+              xx_color_management_surface_v4_unset_image_description(hdrSurface->colorSurface);
             }
             hdrSwapchain->desc_dirty = false;
           }
@@ -730,11 +722,11 @@ namespace HdrLayer
     }
 
   private:
-    static constexpr struct xx_image_description_v2_listener image_description_interface_listener
+    static constexpr struct xx_image_description_v4_listener image_description_interface_listener
     {
       .failed = [](
                     void *data,
-                    struct xx_image_description_v2 *xx_image_description_v2,
+                    struct xx_image_description_v4 *xx_image_description_V4,
                     uint32_t cause,
                     const char *msg)
       {
@@ -742,7 +734,7 @@ namespace HdrLayer
         auto state = reinterpret_cast<enum DescStatus *>(data);
         *state = DescStatus::FAILED;
       },
-      .ready = [](void *data, struct xx_image_description_v2 *xx_image_description_v2, uint32_t identity)
+      .ready = [](void *data, struct xx_image_description_v4 *xx_image_description_V4, uint32_t identity)
       {
         auto state = reinterpret_cast<enum DescStatus *>(data);
         *state = DescStatus::READY;
